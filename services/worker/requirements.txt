@@ -1,0 +1,8 @@
+imapclient
+psycopg[binary]
+sqlalchemy
+alembic
+httpx
+python-dotenv
+beautifulsoup4
+pgvector

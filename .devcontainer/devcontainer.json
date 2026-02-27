@@ -1,0 +1,16 @@
+{
+    "name": "Presence Dev",
+    "dockerComposeFile": "../infra/docker-compose.yml",
+    "service": "dev",
+    "workspaceFolder": "/workspace",
+    "features": {
+        "ghcr.io/devcontainers/features/node:1": {},
+        "ghcr.io/devcontainers/features/python:1": {}
+    },
+    "forwardPorts": [
+        3000,
+        5432,
+        11434
+    ],
+    "postCreateCommand": "python --version && node --version && npm --version"
+}

@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    container_name: presence_dev
+    volumes:
+      # Mount your repo into the container
+      - ..:/workspace:cached
+    working_dir: /workspace
+    command: sleep infinity
+    depends_on:
+      - postgres
+      - ollama
+    environment:
+      # Convenience defaults (use .env later if you want)
+      DATABASE_URL: postgresql://presence:presence@postgres:5432/presence
+      OLLAMA_URL: http://ollama:11434
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: presence_postgres
+    environment:
+      POSTGRES_USER: presence
+      POSTGRES_PASSWORD: presence
+      POSTGRES_DB: presence
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  ollama:
+    image: ollama/ollama
+    container_name: presence_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  postgres_data:
+  ollama_data:

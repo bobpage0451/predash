@@ -1,0 +1,1 @@
+# Presence worker app package
