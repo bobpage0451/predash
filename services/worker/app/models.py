@@ -63,6 +63,9 @@ class EmailRaw(Base):
     stories: Mapped[list["EmailStory"]] = relationship(
         back_populates="email", cascade="all, delete-orphan"
     )
+    filter_metrics: Mapped["EmailFilterMetrics | None"] = relationship(
+        back_populates="email", cascade="all, delete-orphan", uselist=False
+    )
 
     __table_args__ = (
         # Partial unique: message_id unique per source (when present)
@@ -164,6 +167,58 @@ class EmailStory(Base):
         Index("ix_email_stories_email_id", "email_id"),
         Index("ix_email_stories_topic_id", "topic_id"),
         Index("ix_email_stories_topic_processed", "topic_id", "processed_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# email_filter_metrics
+# ---------------------------------------------------------------------------
+
+
+class EmailFilterMetrics(Base):
+    """Heuristic pre-filter signals and outcomes for a single email."""
+
+    __tablename__ = "email_filter_metrics"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    email_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("emails_raw.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    # Final scores
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    quality: Mapped[str | None] = mapped_column(Text, nullable=True)  # "good" / "poor" / "skip" / None
+    filter_outcome: Mapped[str] = mapped_column(Text, nullable=False)  # "pass" / "low_confidence" / "poor_quality"
+
+    # Raw signals — stored individually for threshold tuning and debugging
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    link_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    text_html_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_sentence_len: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cta_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_list_unsubscribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_bulk_precedence: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    esp_detected: Mapped[str | None] = mapped_column(Text, nullable=True)  # e.g. "mailchimp", "substack"
+
+    # Relationship
+    email: Mapped["EmailRaw"] = relationship(back_populates="filter_metrics")
+
+    __table_args__ = (
+        # One evaluation per email
+        Index("uq_email_filter_metrics_email_id", "email_id", unique=True),
+        Index("ix_email_filter_metrics_filter_outcome", "filter_outcome"),
+        Index("ix_email_filter_metrics_evaluated_at", "evaluated_at"),
     )
 
 

@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -27,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db import get_session
 from app.llm import ollama_client
-from app.models import EmailRaw, EmailStory
+from app.models import EmailFilterMetrics, EmailRaw, EmailStory
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -109,6 +110,7 @@ Rules:
 - Do NOT merge unrelated topics into a single story.
 - Do NOT invent details. Be concise.
 - Each story should be self-contained and understandable on its own.
+- If the email is a personal message, receipt, order confirmation, calendar invite, or otherwise NOT a newsletter with extractable news/stories, you must return an empty array for stories.
 
 Output a JSON object with key "stories" containing an array of objects,
 each with keys: headline, summary, tags, action_type.
@@ -199,6 +201,19 @@ def _build_candidate_query(
 
     conditions = [~already_extracted]
 
+    # Exclude emails already filtered out (but keep ones that passed — they may
+    # still lack story rows and should be (re-)processed by the LLM).
+    already_filtered_out = (
+        select(EmailFilterMetrics.id)
+        .where(
+            EmailFilterMetrics.email_id == EmailRaw.id,
+            EmailFilterMetrics.filter_outcome != "pass",
+        )
+        .correlate(EmailRaw)
+        .exists()
+    )
+    conditions.append(~already_filtered_out)
+
     if since_last and checkpoint is not None:
         conditions.append(_email_timestamp() > checkpoint)
 
@@ -257,13 +272,13 @@ def _process_one(
             return [EmailStory(
                 email_id=email_row.id,
                 story_index=0,
-                headline="(no stories extracted)",
-                summary="The LLM returned an empty stories array.",
+                headline="(not a newsletter)",
+                summary="The LLM returned an empty stories array. Categorized as ignored.",
                 tags=None,
                 processor=processor,
                 model=model,
                 prompt_version=prompt_version,
-                status="ok",
+                status="ignored",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 latency_ms=elapsed_ms,
@@ -329,6 +344,164 @@ def _process_one(
 
 
 # ---------------------------------------------------------------------------
+# Pre-LLM filter
+# ---------------------------------------------------------------------------
+
+_ESP_PATTERN = re.compile(
+    r"sendgrid|mailchimp|klaviyo|hubspot|substack|beehiiv|convertkit"
+    r"|mailerlite|campaignmonitor",
+    re.IGNORECASE,
+)
+_NOREPLY_PATTERN = re.compile(r"no.?reply|do.not.reply", re.IGNORECASE)
+_TRANSACTIONAL_PATTERN = re.compile(
+    r"order confirm|receipt|invoice|your booking|password reset"
+    r"|verification code|you.ve been invited|unsubscribe confirm",
+    re.IGNORECASE,
+)
+_CTA_PATTERN = re.compile(
+    r"continue reading|read more|learn more|read full|explore|view article",
+    re.IGNORECASE,
+)
+
+
+def compute_filter_metrics(email_row: EmailRaw) -> dict:
+    """Compute all heuristic signals for *email_row* and return a metrics dict.
+
+    The returned dict maps directly to the columns of EmailFilterMetrics
+    (excluding id, email_id, evaluated_at, and filter_outcome which are set
+    by the caller).
+
+    Confidence scoring
+    ------------------
+    Starts at 0.5 and is clamped to [0.0, 1.0] after applying deltas:
+      +0.4  List-Unsubscribe header present
+      +0.3  Precedence: bulk / list / junk
+      +0.3  X-Mailer / X-ESP matches a known ESP
+      -0.4  from_addr matches no-reply pattern
+      -0.4  subject matches transactional pattern
+      +0.1  body_text length > 800
+      -0.2  body_text length < 150
+
+    Quality scoring
+    ---------------
+    Always computed (caller decides whether to use based on confidence):
+      word_count < 10        → "skip"
+      link_density > 0.3     → "poor"
+      text_html_ratio < 0.08 → "poor"
+      avg_sentence_len < 6   → "poor"
+      cta_count >= 3         → "poor"
+      otherwise              → "good"
+    """
+    headers: dict = email_row.raw_headers or {}
+    body_text: str = email_row.body_text or ""
+    body_html: str = email_row.body_html or ""
+    from_addr: str = email_row.from_addr or ""
+    subject: str = email_row.subject or ""
+
+    # ── Confidence signals ─────────────────────────────────────────────
+    confidence = 0.5
+
+    has_list_unsubscribe = "List-Unsubscribe" in headers or "list-unsubscribe" in headers
+    if has_list_unsubscribe:
+        confidence += 0.4
+
+    precedence = str(headers.get("Precedence") or headers.get("precedence") or "").lower()
+    has_bulk_precedence = precedence in ("bulk", "list", "junk")
+    if has_bulk_precedence:
+        confidence += 0.3
+
+    esp_detected: str | None = None
+    for header_key in ("X-Mailer", "x-mailer", "X-ESP", "x-esp"):
+        val = str(headers.get(header_key) or "")
+        m = _ESP_PATTERN.search(val)
+        if m:
+            esp_detected = m.group(0).lower()
+            confidence += 0.3
+            break
+
+    if _NOREPLY_PATTERN.search(from_addr):
+        confidence -= 0.4
+
+    if _TRANSACTIONAL_PATTERN.search(subject):
+        confidence -= 0.4
+
+    body_len = len(body_text)
+    if body_len > 800:
+        confidence += 0.1
+    elif body_len < 150:
+        confidence -= 0.2
+
+    confidence = max(0.0, min(1.0, confidence))
+
+    # ── Quality signals ────────────────────────────────────────────────
+    words = body_text.split() if body_text else []
+    word_count = len(words)
+
+    # Link density: href= occurrences in HTML divided by word count
+    link_density: float | None = None
+    if body_html:
+        href_count = len(re.findall(r"href=", body_html, re.IGNORECASE))
+        link_density = href_count / word_count if word_count > 0 else 0.0
+
+    # Text-to-HTML ratio
+    text_html_ratio: float | None = None
+    if body_html:
+        html_len = len(body_html)
+        text_html_ratio = len(body_text) / html_len if html_len > 0 else 0.0
+
+    # Average sentence length (words per sentence)
+    sentences = [s for s in re.split(r"[.!?]", body_text) if len(s.strip()) > 10]
+    avg_sentence_len: float | None = None
+    if sentences:
+        avg_sentence_len = sum(len(s.split()) for s in sentences) / len(sentences)
+
+    # CTA count
+    cta_count = len(_CTA_PATTERN.findall(body_text))
+
+    # Determine quality grade
+    if word_count < 10:
+        quality: str | None = "skip"
+    elif link_density is not None and link_density > 0.3:
+        quality = "poor"
+    elif text_html_ratio is not None and text_html_ratio < 0.08:
+        quality = "poor"
+    elif avg_sentence_len is not None and avg_sentence_len < 6:
+        quality = "poor"
+    elif cta_count >= 3:
+        quality = "poor"
+    else:
+        quality = "good"
+
+    return {
+        "confidence": confidence,
+        "quality": quality,
+        "word_count": word_count,
+        "link_density": round(link_density, 4) if link_density is not None else None,
+        "text_html_ratio": round(text_html_ratio, 4) if text_html_ratio is not None else None,
+        "avg_sentence_len": round(avg_sentence_len, 2) if avg_sentence_len is not None else None,
+        "cta_count": cta_count,
+        "has_list_unsubscribe": has_list_unsubscribe,
+        "has_bulk_precedence": has_bulk_precedence,
+        "esp_detected": esp_detected,
+    }
+
+
+def determine_outcome(metrics: dict, confidence_threshold: float) -> str:
+    """Return the filter_outcome string given a metrics dict and a threshold.
+
+    Returns one of:
+      ``"low_confidence"``  – confidence < threshold
+      ``"poor_quality"``    – quality is "poor" or "skip"
+      ``"pass"``            – email should be sent to the LLM
+    """
+    if metrics["confidence"] < confidence_threshold:
+        return "low_confidence"
+    if metrics.get("quality") in ("poor", "skip"):
+        return "poor_quality"
+    return "pass"
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -346,10 +519,11 @@ def main(argv: list[str] | None = None) -> None:
     ollama_timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "120"))
     default_limit = int(os.environ.get("EMAIL_PROCESS_LIMIT", "50"))
     limit = args.limit if args.limit is not None else default_limit
+    CONFIDENCE_THRESHOLD = float(os.environ.get("NEWSLETTER_CONFIDENCE_THRESHOLD", "0.5"))
 
     log.info(
-        "Stories config: model=%s  processor=%s  prompt_version=%s  limit=%d  since_last=%s",
-        model, processor, prompt_version, limit, args.since_last,
+        "Stories config: model=%s  processor=%s  prompt_version=%s  limit=%d  since_last=%s  confidence_threshold=%.2f",
+        model, processor, prompt_version, limit, args.since_last, CONFIDENCE_THRESHOLD,
     )
 
     # ── Checkpoint ──────────────────────────────────────────────────────
@@ -391,8 +565,38 @@ def main(argv: list[str] | None = None) -> None:
 
     for i, email_row in enumerate(candidates, 1):
         subject_preview = (email_row.subject or "(no subject)")[:60]
-        log.info("[%d/%d] Extracting stories: %s", i, len(candidates), subject_preview)
+        log.info("[%d/%d] Processing: %s", i, len(candidates), subject_preview)
 
+        # ── Pre-LLM filter ───────────────────────────────────────────
+        metrics = compute_filter_metrics(email_row)
+        outcome = determine_outcome(metrics, CONFIDENCE_THRESHOLD)
+
+        log.info(
+            "  filter: confidence=%.2f  quality=%s  outcome=%s  esp=%s"
+            "  link_density=%s  text_html_ratio=%s",
+            metrics["confidence"],
+            metrics["quality"],
+            outcome,
+            metrics["esp_detected"],
+            metrics["link_density"],
+            metrics["text_html_ratio"],
+        )
+
+        with Session() as session:
+            session.merge(
+                EmailFilterMetrics(
+                    email_id=email_row.id,
+                    **metrics,
+                    filter_outcome=outcome,
+                )
+            )
+            session.commit()
+
+        if outcome != "pass":
+            skip_count += 1
+            continue
+
+        # ── LLM extraction ───────────────────────────────────────────
         story_rows = _process_one(
             email_row=email_row,
             processor=processor,

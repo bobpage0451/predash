@@ -77,7 +77,7 @@ python -m app --limit 10              # forward --limit to all stages
 python -m app --stop-on-error         # abort on first stage failure
 ```
 
-Runs **IMAP ingest → story extraction → embedding backfill → topic assignment** sequentially with per-stage logging and a summary at the end. By default, a failure in one stage doesn't block the next.
+Runs **IMAP ingest → pre-LLM filter → story extraction → embedding backfill → topic assignment** sequentially with per-stage logging and a summary at the end. Emails that don't look like newsletters are skipped before the LLM call. By default, a failure in one stage doesn't block the next.
 
 ### Run stages individually
 
@@ -124,6 +124,7 @@ psql postgresql://presence:presence@postgres:5432/presence
 | `\d emails_raw` | Show `emails_raw` schema |
 | `SELECT * FROM emails_raw LIMIT 5;` | Preview raw emails |
 | `SELECT * FROM email_stories LIMIT 5;` | Preview extracted stories |
+| `SELECT filter_outcome, count(*) FROM email_filter_metrics GROUP BY 1;` | Pre-filter outcomes breakdown |
 | `SELECT id, label, story_count FROM topics ORDER BY last_story_at DESC LIMIT 10;` | Preview topics with labels |
 
 ## Component READMEs

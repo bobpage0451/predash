@@ -5,12 +5,15 @@ The worker is a Python service responsible for **ingesting emails via IMAP**, ex
 ## What It Does
 
 1. **IMAP Ingestion** — Connects to an IMAP mailbox over TLS, fetches new messages (incremental by UID), parses headers/body, and writes them to `emails_raw`.
-2. **Story Extraction** — Sends emails to Ollama to extract individual `email_stories` with headline, summary, tags, and `action_type`. Newsletters with multiple topics produce multiple stories.
+2. **Pre-LLM Filtering** — Before calling the LLM, each email is scored with lightweight heuristics (header signals, sender pattern, body quality). Emails that score below the confidence threshold or fail quality checks are stamped in `email_filter_metrics` and skipped, saving LLM cost on receipts, password-reset emails, and pure-promo blasts.
+3. **Story Extraction** — Sends emails that pass the filter to Ollama to extract individual `email_stories` with headline, summary, tags, and `action_type`. Newsletters with multiple topics produce multiple stories.
 3. **Embedding** — Computes vector embeddings (768-dim, via Ollama `nomic-embed-text`) for each story.
 4. **Topic Assignment** — Groups stories into `topics` using pgvector cosine similarity with centroid matching. Topics are matchable if recent (≤60 days) or evergreen (≥20 stories). New topics are created when no match exceeds the similarity threshold (default 0.85). When a topic accumulates ≥2 stories, a short label is auto-generated via Ollama.
 5. **Embed Desired Actions** — Computes embeddings for user-created desired actions that don't have one yet. Actions are also embedded inline when created via the dashboard API.
 6. **Action Matching** — Cross-joins desired actions against stories using pgvector cosine distance. Matches above the similarity threshold (default 0.72) are stored in `action_matches`, with an optional `action_type` filter bonus.
 7. **Deduplication** — Uses `message_id`, `imap_uid`, and `sha256` to avoid duplicate inserts.
+
+> The pre-filter is idempotent and uses `session.merge()`, so re-running after adjusting `NEWSLETTER_CONFIDENCE_THRESHOLD` will overwrite old decisions without manual cleanup.
 
 ## Project Structure
 
@@ -87,6 +90,7 @@ Optional variables:
 | `TOPIC_STORY_FETCH_WINDOW_DAYS` | `0` (all) | Only fetch stories from the last N days |
 | `ACTION_MATCH_LIMIT` | `0` (unlimited) | Max stories to consider per action match run |
 | `ACTION_SIM_THRESHOLD` | `0.72` | Cosine similarity threshold for action matching |
+| `NEWSLETTER_CONFIDENCE_THRESHOLD` | `0.5` | Min confidence score for an email to reach the LLM (0.0–1.0) |
 
 ## Usage
 
@@ -126,7 +130,7 @@ python -m app.llm --stories          # explicit: same as above
 python -m app.llm --limit 10        # cap to 10 emails
 ```
 
-Extracts individual stories from unprocessed emails via Ollama and writes them to `email_stories`. Each email can produce multiple stories. Incremental and idempotent.
+Each candidate email is first scored by the **pre-LLM filter** (heuristics only, no network call). Emails that fail the confidence or quality checks are recorded in `email_filter_metrics` with `filter_outcome = "low_confidence" | "poor_quality"` and skipped. Only emails with `filter_outcome = "pass"` are sent to Ollama. Results are written to `email_stories`. Incremental and idempotent.
 
 CLI flags:
 
@@ -233,3 +237,7 @@ User-defined actions to watch for. Key fields: `description`, `action_types` (JS
 ### `action_matches`
 
 Matches between desired actions and email stories. Key fields: `desired_action_id` (FK → `desired_actions`), `story_id` (FK → `email_stories`), `similarity_score`, `action_type_matched`, `matched_at`. Unique on `(desired_action_id, story_id)`.
+
+### `email_filter_metrics`
+
+Pre-LLM heuristic scores — one row per email, written before any LLM call. Key fields: `email_id` (FK → `emails_raw`, unique), `confidence` (0–1 float), `quality` (`"good"` / `"poor"` / `"skip"`), `filter_outcome` (`"pass"` / `"low_confidence"` / `"poor_quality"`). Raw signal columns (`word_count`, `link_density`, `text_html_ratio`, `avg_sentence_len`, `cta_count`, `has_list_unsubscribe`, `has_bulk_precedence`, `esp_detected`) are stored individually for threshold tuning. Rows are overwritten on re-run via `MERGE`, so changing `NEWSLETTER_CONFIDENCE_THRESHOLD` and re-running is all that's needed to re-evaluate.
