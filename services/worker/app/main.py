@@ -52,14 +52,6 @@ STAGES = [
         "name": "Topic Assignment",
         "description": "Assign stories to topics via centroid matching",
     },
-    {
-        "name": "Embed Desired Actions",
-        "description": "Compute embeddings for new desired actions",
-    },
-    {
-        "name": "Action Matching",
-        "description": "Match stories against desired actions",
-    },
 ]
 
 BANNER_WIDTH = 60
@@ -145,20 +137,6 @@ def _run_assign_topics(argv: list[str]) -> None:
     topics_main(argv)
 
 
-def _run_embed_desired_actions(argv: list[str]) -> None:
-    """Run desired actions embedding."""
-    from app.llm.embed_desired_actions import main as embed_actions_main
-
-    embed_actions_main(argv)
-
-
-def _run_match_actions(argv: list[str]) -> None:
-    """Run action matching."""
-    from app.llm.match_actions import main as match_main
-
-    match_main(argv)
-
-
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -177,14 +155,11 @@ def run_pipeline(argv: list[str] | None = None) -> None:
     stories_argv: list[str] = []
     embed_argv: list[str] = []
     topics_argv: list[str] = []
-    embed_actions_argv: list[str] = []
-    match_actions_argv: list[str] = []
 
     if args.limit:
         stories_argv.extend(["--limit", str(args.limit)])
         embed_argv.extend(["--limit", str(args.limit)])
         topics_argv.extend(["--limit", str(args.limit)])
-        match_actions_argv.extend(["--limit", str(args.limit)])
     if args.source:
         stories_argv.extend(["--source", args.source])
     if args.mailbox:
@@ -199,8 +174,6 @@ def run_pipeline(argv: list[str] | None = None) -> None:
         lambda: _run_extract_stories(stories_argv),
         lambda: _run_compute_embeddings(embed_argv),
         lambda: _run_assign_topics(topics_argv),
-        lambda: _run_embed_desired_actions(embed_actions_argv),
-        lambda: _run_match_actions(match_actions_argv),
     ]
 
     pipeline_t0 = time.time()

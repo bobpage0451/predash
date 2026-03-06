@@ -132,7 +132,6 @@ class EmailStory(Base):
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding = mapped_column(Vector(768), nullable=True)
-    action_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("topics.id"),
@@ -147,9 +146,6 @@ class EmailStory(Base):
     # Relationships
     email: Mapped["EmailRaw"] = relationship(back_populates="stories")
     topic: Mapped["Topic | None"] = relationship(back_populates="stories")
-    action_matches: Mapped[list["ActionMatch"]] = relationship(
-        back_populates="story", cascade="all, delete-orphan"
-    )
 
     __table_args__ = (
         # Unique constraint: prevent duplicate stories per run
@@ -264,89 +260,3 @@ class Topic(Base):
     )
 
 
-# ---------------------------------------------------------------------------
-# desired_actions
-# ---------------------------------------------------------------------------
-
-
-class DesiredAction(Base):
-    __tablename__ = "desired_actions"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    action_types: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
-    active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-
-    # Relationships
-    matches: Mapped[list["ActionMatch"]] = relationship(
-        back_populates="desired_action", cascade="all, delete-orphan"
-    )
-
-
-# ---------------------------------------------------------------------------
-# action_matches
-# ---------------------------------------------------------------------------
-
-
-class ActionMatch(Base):
-    __tablename__ = "action_matches"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    desired_action_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("desired_actions.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    story_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("email_stories.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
-    action_type_matched: Mapped[bool | None] = mapped_column(
-        Boolean, nullable=True
-    )
-    matched_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-
-    # Relationships
-    desired_action: Mapped["DesiredAction"] = relationship(
-        back_populates="matches"
-    )
-    story: Mapped["EmailStory"] = relationship(back_populates="action_matches")
-
-    __table_args__ = (
-        Index(
-            "uq_action_matches_action_story",
-            "desired_action_id",
-            "story_id",
-            unique=True,
-        ),
-        Index("ix_action_matches_desired_action_id", "desired_action_id"),
-        Index("ix_action_matches_story_id", "story_id"),
-        Index("ix_action_matches_matched_at", "matched_at"),
-    )

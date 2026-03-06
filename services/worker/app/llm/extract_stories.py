@@ -92,17 +92,6 @@ or piece of news discussed. For each one, produce:
 - tags: a flat list of broad categorical tags for THIS story only
   (e.g. "fintech", "regulation", "AI", "gold", "Europe").
   Prefer general/reusable labels over email-specific actions.
-- action_type: classify the kind of action this story enables for the reader.
-  Use ONE of the following values, or null if the story is purely informational
-  with no actionable element:
-  "discount_offer"       – a sale, price drop, or discount promotion
-  "coupon"               – a redeemable coupon or promo code
-  "job_posting"          – a job opening or career opportunity
-  "event"                – an event, webinar, conference, or meetup
-  "deadline"             – an upcoming deadline or expiration
-  "subscription_offer"   – a new subscription, trial, or membership offer
-  "informational"        – useful info that might help someone researching a topic
-  null                   – none of the above / pure news
 
 Rules:
 - If the email covers 5 different topics, return 5 separate objects.
@@ -113,13 +102,13 @@ Rules:
 - If the email is a personal message, receipt, order confirmation, calendar invite, or otherwise NOT a newsletter with extractable news/stories, you must return an empty array for stories.
 
 Output a JSON object with key "stories" containing an array of objects,
-each with keys: headline, summary, tags, action_type.
+each with keys: headline, summary, tags.
 
 Example output:
 {"stories": [
-  {"headline": "ECB holds rates steady", "summary": "The European Central Bank kept interest rates unchanged at 4.5%, citing persistent inflation.", "tags": ["ECB", "interest rates", "Europe", "monetary policy"], "action_type": null},
-  {"headline": "Stripe launches AI fraud detection", "summary": "Stripe announced a new AI-powered fraud detection tool for online merchants.", "tags": ["Stripe", "AI", "fraud", "fintech"], "action_type": "informational"},
-  {"headline": "Tommy Hilfiger 40% off winter sale", "summary": "Tommy Hilfiger is offering 40% off their winter collection through February 28.", "tags": ["Tommy Hilfiger", "fashion", "sale"], "action_type": "discount_offer"}
+  {"headline": "ECB holds rates steady", "summary": "The European Central Bank kept interest rates unchanged at 4.5%, citing persistent inflation.", "tags": ["ECB", "interest rates", "Europe", "monetary policy"]},
+  {"headline": "Stripe launches AI fraud detection", "summary": "Stripe announced a new AI-powered fraud detection tool for online merchants.", "tags": ["Stripe", "AI", "fraud", "fintech"]},
+  {"headline": "Tommy Hilfiger 40% off winter sale", "summary": "Tommy Hilfiger is offering 40% off their winter collection through February 28.", "tags": ["Tommy Hilfiger", "fashion", "sale"]}
 ]}"""
 
 # ---------------------------------------------------------------------------
@@ -286,15 +275,12 @@ def _process_one(
 
         results = []
         for idx, story in enumerate(stories_data):
-            raw_action = story.get("action_type")
-            action_type = raw_action if isinstance(raw_action, str) else None
             results.append(EmailStory(
                 email_id=email_row.id,
                 story_index=idx,
                 headline=story.get("headline", "(no headline)")[:500],
                 summary=story.get("summary", "(no summary)")[:2000],
                 tags=story.get("tags", []),
-                action_type=action_type,
                 processor=processor,
                 model=model,
                 prompt_version=prompt_version,

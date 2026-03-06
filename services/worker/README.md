@@ -1,17 +1,15 @@
 # Worker Service
 
-The worker is a Python service responsible for **ingesting emails via IMAP**, extracting stories with LLMs, **grouping stories into topics**, and **matching stories against user-defined desired actions** — all stored in PostgreSQL.
+The worker is a Python service responsible for **ingesting emails via IMAP**, extracting stories with LLMs, and **grouping stories into topics** — all stored in PostgreSQL.
 
 ## What It Does
 
 1. **IMAP Ingestion** — Connects to an IMAP mailbox over TLS, fetches new messages (incremental by UID), parses headers/body, and writes them to `emails_raw`.
 2. **Pre-LLM Filtering** — Before calling the LLM, each email is scored with lightweight heuristics (header signals, sender pattern, body quality). Emails that score below the confidence threshold or fail quality checks are stamped in `email_filter_metrics` and skipped, saving LLM cost on receipts, password-reset emails, and pure-promo blasts.
-3. **Story Extraction** — Sends emails that pass the filter to Ollama to extract individual `email_stories` with headline, summary, tags, and `action_type`. Newsletters with multiple topics produce multiple stories.
+3. **Story Extraction** — Sends emails that pass the filter to Ollama to extract individual `email_stories` with headline, summary, and tags. Newsletters with multiple topics produce multiple stories.
 3. **Embedding** — Computes vector embeddings (768-dim, via Ollama `nomic-embed-text`) for each story.
 4. **Topic Assignment** — Groups stories into `topics` using pgvector cosine similarity with centroid matching. Topics are matchable if recent (≤60 days) or evergreen (≥20 stories). New topics are created when no match exceeds the similarity threshold (default 0.85). When a topic accumulates ≥2 stories, a short label is auto-generated via Ollama.
-5. **Embed Desired Actions** — Computes embeddings for user-created desired actions that don't have one yet. Actions are also embedded inline when created via the dashboard API.
-6. **Action Matching** — Cross-joins desired actions against stories using pgvector cosine distance. Matches above the similarity threshold (default 0.72) are stored in `action_matches`, with an optional `action_type` filter bonus.
-7. **Deduplication** — Uses `message_id`, `imap_uid`, and `sha256` to avoid duplicate inserts.
+5. **Deduplication** — Uses `message_id`, `imap_uid`, and `sha256` to avoid duplicate inserts.
 
 > The pre-filter is idempotent and uses `session.merge()`, so re-running after adjusting `NEWSLETTER_CONFIDENCE_THRESHOLD` will overwrite old decisions without manual cleanup.
 
@@ -31,14 +29,12 @@ services/worker/
 │   │   └── ingest.py          # One-shot IMAP fetch logic
 │   └── llm/
 │       ├── __init__.py
-│       ├── __main__.py          # `python -m app.llm [--stories|--embeddings|--topics|--embed-actions|--match-actions]`
+│       ├── __main__.py          # `python -m app.llm [--stories|--embeddings|--topics]`
 │       ├── ollama_client.py     # Ollama HTTP API client (chat + embed)
 │       ├── extract_stories.py   # Story extraction from emails
 │       ├── compute_embeddings.py  # Embedding backfill for stories
 │       ├── assign_topics.py     # Topic assignment via centroid matching
-│       ├── generate_topic_label.py # LLM-based topic label generation
-│       ├── embed_desired_actions.py # Embed desired action descriptions
-│       └── match_actions.py     # Match stories against desired actions
+│       └── generate_topic_label.py # LLM-based topic label generation
 ├── alembic/                   # Database migrations
 ├── alembic.ini                # Alembic configuration
 ├── scripts/
@@ -88,8 +84,6 @@ Optional variables:
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
 | `TOPIC_ASSIGN_LIMIT` | _(unlimited)_ | Default max stories for topic assignment |
 | `TOPIC_STORY_FETCH_WINDOW_DAYS` | `0` (all) | Only fetch stories from the last N days |
-| `ACTION_MATCH_LIMIT` | `0` (unlimited) | Max stories to consider per action match run |
-| `ACTION_SIM_THRESHOLD` | `0.72` | Cosine similarity threshold for action matching |
 | `NEWSLETTER_CONFIDENCE_THRESHOLD` | `0.5` | Min confidence score for an email to reach the LLM (0.0–1.0) |
 
 ## Usage
@@ -97,13 +91,13 @@ Optional variables:
 ### Run full pipeline
 
 ```bash
-python -m app                         # run all 6 stages sequentially
+python -m app                         # run all 4 stages sequentially
 python -m app --limit 10              # forward --limit to all stages
 python -m app --stop-on-error         # abort on first stage failure
 python -m app --source "eclipso:user" # filter story extraction by source
 ```
 
-Runs the entire pipeline end-to-end: **IMAP ingest → story extraction → embedding backfill → topic assignment → embed desired actions → action matching**. Each stage gets a log banner with timing, and you get a summary table at the end. By default, failures in one stage don't block the next.
+Runs the entire pipeline end-to-end: **IMAP ingest → story extraction → embedding backfill → topic assignment**. Each stage gets a log banner with timing, and you get a summary table at the end. By default, failures in one stage don't block the next.
 
 CLI flags:
 
@@ -170,31 +164,6 @@ CLI flags:
 | `--ollama-base-url URL` | Ollama API endpoint for label generation (default: `OLLAMA_BASE_URL`) |
 | `--ollama-model M` | Ollama model for label generation (default: `OLLAMA_MODEL`) |
 
-### Run desired action embedding
-
-```bash
-python -m app.llm --embed-actions
-python -m app.llm --embed-actions --limit 10
-```
-
-Embeds desired action descriptions that don't have a vector yet. Also runs automatically as pipeline stage 5. Actions created via the dashboard API are embedded inline on save, so this is mainly a batch fallback.
-
-### Run action matching
-
-```bash
-python -m app.llm --match-actions
-python -m app.llm --match-actions --sim-threshold 0.72
-```
-
-Matches email stories against active desired actions using pgvector cosine similarity. Inserts new matches into `action_matches` (idempotent via unique constraint). Optionally checks if the story's `action_type` matches the action's `action_types` filter.
-
-CLI flags:
-
-| Flag | Description |
-|---|---|
-| `--limit N` | Max stories to consider per action (default: `ACTION_MATCH_LIMIT` or unlimited) |
-| `--sim-threshold F` | Cosine similarity threshold (default: `ACTION_SIM_THRESHOLD` or `0.72`) |
-
 ### Run database smoke test
 
 ```bash
@@ -224,19 +193,11 @@ Stores raw email data as ingested from IMAP. Key fields: `source`, `mailbox`, `m
 
 ### `email_stories`
 
-Individual stories extracted from emails. Key fields: `email_id` (FK → `emails_raw`), `headline`, `summary`, `tags`, `action_type`, `embedding` (VECTOR(768)), `topic_id` (FK → `topics`).
+Individual stories extracted from emails. Key fields: `email_id` (FK → `emails_raw`), `headline`, `summary`, `tags`, `embedding` (VECTOR(768)), `topic_id` (FK → `topics`).
 
 ### `topics`
 
 Topic clusters built from story embeddings via centroid matching. Key fields: `centroid_embedding` (VECTOR(768)), `story_count`, `last_story_at`, `label` (NULL until LLM-generated), `status`.
-
-### `desired_actions`
-
-User-defined actions to watch for. Key fields: `description`, `action_types` (JSONB array of types to filter), `embedding` (VECTOR(768)), `active` (boolean).
-
-### `action_matches`
-
-Matches between desired actions and email stories. Key fields: `desired_action_id` (FK → `desired_actions`), `story_id` (FK → `email_stories`), `similarity_score`, `action_type_matched`, `matched_at`. Unique on `(desired_action_id, story_id)`.
 
 ### `email_filter_metrics`
 

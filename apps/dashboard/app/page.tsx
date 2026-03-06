@@ -3,14 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import StoryCard from "@/components/StoryCard";
 import TopicCard, { FeedItem } from "@/components/TopicCard";
-import DesiredActionsSidebar from "@/components/DesiredActionsSidebar";
-import AddActionModal from "@/components/AddActionModal";
 import EmailModal from "@/components/EmailModal";
 
 export default function FeedPage() {
-  const [showAddModal, setShowAddModal] = useState(false);
   const [activeEmailModalStoryId, setActiveEmailModalStoryId] = useState<string | null>(null);
-  const [sidebarKey, setSidebarKey] = useState(0);
 
   // ── Feed state ──
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
@@ -65,13 +61,6 @@ export default function FeedPage() {
 
       {/* Two-column layout: sidebar + feed */}
       <div className="page-layout">
-        {/*
-        <DesiredActionsSidebar
-          key={sidebarKey}
-          onOpenAdd={() => setShowAddModal(true)}
-        />
-        */}
-
         {/* Feed grid */}
         <main className="feed-main topic-feed">
           {error && (
@@ -136,14 +125,6 @@ export default function FeedPage() {
           )}
         </main>
       </div>
-
-      {/* Add Action Modal */}
-      {showAddModal && (
-        <AddActionModal
-          onClose={() => setShowAddModal(false)}
-          onCreated={() => setSidebarKey((k) => k + 1)}
-        />
-      )}
 
       {/* Shared Email Modal */}
       {activeEmailModalStoryId && (
