@@ -92,6 +92,17 @@ or piece of news discussed. For each one, produce:
 - tags: a flat list of broad categorical tags for THIS story only
   (e.g. "fintech", "regulation", "AI", "gold", "Europe").
   Prefer general/reusable labels over email-specific actions.
+- sentiment: one of "bullish", "bearish", or "neutral".
+  Use "bullish" for positive/optimistic outlooks, "bearish" for negative/pessimistic,
+  and "neutral" for informational or mixed news.
+- named_entities: a list of specific named entities mentioned in this story.
+  Include companies (e.g. "Apple", "Google"), people (e.g. "Elon Musk"),
+  places (e.g. "EU", "China"), products, and financial instruments.
+  Keep each entry concise. Omit generic words.
+- emojis: a string of 1–2 relevant Unicode emojis that visually represent the topic.
+  Examples: gold price → "🪙", stock market decline → "📉", AI news → "🤖",
+  crypto → "₿", Europe → "🇪🇺", oil → "🛢️", rate hike → "📈".
+  Return exactly 1 or 2 emojis as a plain string (no spaces between them).
 
 Rules:
 - If the email covers 5 different topics, return 5 separate objects.
@@ -102,13 +113,13 @@ Rules:
 - If the email is a personal message, receipt, order confirmation, calendar invite, or otherwise NOT a newsletter with extractable news/stories, you must return an empty array for stories.
 
 Output a JSON object with key "stories" containing an array of objects,
-each with keys: headline, summary, tags.
+each with keys: headline, summary, tags, sentiment, named_entities, emojis.
 
 Example output:
 {"stories": [
-  {"headline": "ECB holds rates steady", "summary": "The European Central Bank kept interest rates unchanged at 4.5%, citing persistent inflation.", "tags": ["ECB", "interest rates", "Europe", "monetary policy"]},
-  {"headline": "Stripe launches AI fraud detection", "summary": "Stripe announced a new AI-powered fraud detection tool for online merchants.", "tags": ["Stripe", "AI", "fraud", "fintech"]},
-  {"headline": "Tommy Hilfiger 40% off winter sale", "summary": "Tommy Hilfiger is offering 40% off their winter collection through February 28.", "tags": ["Tommy Hilfiger", "fashion", "sale"]}
+  {"headline": "ECB holds rates steady", "summary": "The European Central Bank kept interest rates unchanged at 4.5%, citing persistent inflation.", "tags": ["ECB", "interest rates", "Europe", "monetary policy"], "sentiment": "neutral", "named_entities": ["ECB", "EU"], "emojis": "🏦📊"},
+  {"headline": "Stripe launches AI fraud detection", "summary": "Stripe announced a new AI-powered fraud detection tool for online merchants.", "tags": ["Stripe", "AI", "fraud", "fintech"], "sentiment": "bullish", "named_entities": ["Stripe"], "emojis": "🤖🔒"},
+  {"headline": "Gold hits record high", "summary": "Gold prices surged to a new all-time high amid global uncertainty.", "tags": ["gold", "commodities", "markets"], "sentiment": "bullish", "named_entities": ["Gold"], "emojis": "🪙📈"}
 ]}"""
 
 # ---------------------------------------------------------------------------
@@ -275,12 +286,17 @@ def _process_one(
 
         results = []
         for idx, story in enumerate(stories_data):
+            raw_sentiment = story.get("sentiment", "neutral")
+            sentiment = raw_sentiment if raw_sentiment in ("bullish", "bearish", "neutral") else "neutral"
             results.append(EmailStory(
                 email_id=email_row.id,
                 story_index=idx,
                 headline=story.get("headline", "(no headline)")[:500],
                 summary=story.get("summary", "(no summary)")[:2000],
                 tags=story.get("tags", []),
+                sentiment=sentiment,
+                named_entities=story.get("named_entities", []) or [],
+                emojis=(story.get("emojis") or "")[:16],  # cap at ~4 emojis worth
                 processor=processor,
                 model=model,
                 prompt_version=prompt_version,
@@ -501,7 +517,7 @@ def main(argv: list[str] | None = None) -> None:
     ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
     model = args.model or os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
     processor = args.processor or os.environ.get("PROCESSOR_NAME", "ollama")
-    prompt_version = args.prompt_version or os.environ.get("STORIES_PROMPT_VERSION", "stories-v2")
+    prompt_version = args.prompt_version or os.environ.get("STORIES_PROMPT_VERSION", "stories-v3")
     ollama_timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "120"))
     default_limit = int(os.environ.get("EMAIL_PROCESS_LIMIT", "50"))
     limit = args.limit if args.limit is not None else default_limit

@@ -7,6 +7,9 @@ export interface StoryPost {
     headline: string;
     summary: string;
     tags: string[] | null;
+    sentiment: "bullish" | "bearish" | "neutral" | null;
+    named_entities: string[] | null;
+    emojis: string | null;
     processed_at: string;
     from_addr: string | null;
     subject: string | null;
@@ -24,8 +27,23 @@ function formatDate(dateStr: string): string {
     });
 }
 
+const SENTIMENT_ICON: Record<string, string> = {
+    bullish: "🟢",
+    bearish: "🔴",
+    neutral: "➖",
+};
+
+const SENTIMENT_CLASS: Record<string, string> = {
+    bullish: "sentiment-bullish",
+    bearish: "sentiment-bearish",
+    neutral: "sentiment-neutral",
+};
+
 export default function StoryCard({ story, onStoryClick }: { story: StoryPost; onStoryClick?: (storyId: string) => void }) {
     const displayDate = story.processed_at || story.date_sent;
+    const sentimentKey = story.sentiment ?? "neutral";
+    const sentimentIcon = SENTIMENT_ICON[sentimentKey] ?? "➖";
+    const sentimentClass = SENTIMENT_CLASS[sentimentKey] ?? "sentiment-neutral";
 
     return (
         <article className="email-card story-card">
@@ -40,10 +58,17 @@ export default function StoryCard({ story, onStoryClick }: { story: StoryPost; o
                         <span className="subject">{story.subject}</span>
                     )}
                 </div>
+                {/* Sentiment badge */}
+                <span className={`sentiment-badge ${sentimentClass}`} title={sentimentKey}>
+                    {sentimentIcon}
+                </span>
             </div>
 
-            {/* Headline */}
-            <h3 className="story-headline">{story.headline}</h3>
+            {/* Headline + emojis */}
+            <h3 className="story-headline">
+                {story.emojis && <span className="story-emojis">{story.emojis} </span>}
+                {story.headline}
+            </h3>
 
             {/* Body: summary */}
             <div className="card-body">
@@ -56,6 +81,17 @@ export default function StoryCard({ story, onStoryClick }: { story: StoryPost; o
                     {story.tags.map((tag, i) => (
                         <span key={i} className="tag">
                             {tag}
+                        </span>
+                    ))}
+                </div>
+            )}
+
+            {/* Named entities */}
+            {story.named_entities && story.named_entities.length > 0 && (
+                <div className="card-entities">
+                    {story.named_entities.map((entity, i) => (
+                        <span key={i} className="entity-tag">
+                            {entity}
                         </span>
                     ))}
                 </div>

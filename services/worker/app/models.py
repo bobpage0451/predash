@@ -121,6 +121,9 @@ class EmailStory(Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sentiment: Mapped[str | None] = mapped_column(Text, nullable=True)  # "bullish" / "bearish" / "neutral"
+    named_entities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # list of entity strings
+    emojis: Mapped[str | None] = mapped_column(Text, nullable=True)  # 1-2 contextual emojis
     processor: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_version: Mapped[str] = mapped_column(Text, nullable=False)

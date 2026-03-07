@@ -249,6 +249,48 @@ body {
   background: rgba(139, 92, 246, 0.22);
 }
 
+/* Sentiment badge */
+.sentiment-badge {
+  margin-left: auto;
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.9;
+  cursor: default;
+}
+
+/* Emojis before the headline */
+.story-emojis {
+  font-style: normal;
+  margin-right: 2px;
+}
+
+/* Named entities chip row */
+.card-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.entity-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #67e8f9;
+  background: rgba(6, 182, 212, 0.1);
+  border-radius: var(--radius-tag);
+  border: 1px solid rgba(6, 182, 212, 0.15);
+  transition: background var(--transition);
+}
+
+.entity-tag:hover {
+  background: rgba(6, 182, 212, 0.2);
+}
+
+
 /* Card footer: clickable date */
 .card-footer {
   border-top: 1px solid var(--border-subtle);

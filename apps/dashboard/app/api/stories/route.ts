@@ -4,22 +4,22 @@ import { query } from "@/lib/db";
 const DEFAULT_LIMIT = 20;
 
 export async function GET(request: NextRequest) {
-    const { searchParams } = request.nextUrl;
-    const cursor = searchParams.get("cursor"); // ISO timestamp
-    const limit = Math.min(
-        Number(searchParams.get("limit")) || DEFAULT_LIMIT,
-        100,
-    );
+  const { searchParams } = request.nextUrl;
+  const cursor = searchParams.get("cursor"); // ISO timestamp
+  const limit = Math.min(
+    Number(searchParams.get("limit")) || DEFAULT_LIMIT,
+    100,
+  );
 
-    const params: unknown[] = [limit];
-    let cursorClause = "";
+  const params: unknown[] = [limit];
+  let cursorClause = "";
 
-    if (cursor) {
-        cursorClause = "AND t.last_story_at < $2";
-        params.push(cursor);
-    }
+  if (cursor) {
+    cursorClause = "AND t.last_story_at < $2";
+    params.push(cursor);
+  }
 
-    const sql = `
+  const sql = `
     SELECT
       t.id as topic_id,
       t.label as topic_label,
@@ -31,6 +31,9 @@ export async function GET(request: NextRequest) {
           'headline', es.headline,
           'summary', es.summary,
           'tags', es.tags,
+          'sentiment', es.sentiment,
+          'named_entities', es.named_entities,
+          'emojis', es.emojis,
           'processed_at', es.processed_at,
           'from_addr', er.from_addr,
           'subject', er.subject,
@@ -47,20 +50,20 @@ export async function GET(request: NextRequest) {
     LIMIT $1
   `;
 
-    try {
-        const rows = await query(sql, params);
+  try {
+    const rows = await query(sql, params);
 
-        const nextCursor =
-            rows.length === limit
-                ? rows[rows.length - 1].topic_updated_at?.toISOString() ?? null
-                : null;
+    const nextCursor =
+      rows.length === limit
+        ? rows[rows.length - 1].topic_updated_at?.toISOString() ?? null
+        : null;
 
-        return NextResponse.json({ feed: rows, nextCursor });
-    } catch (err) {
-        console.error("Failed to fetch stories:", err);
-        return NextResponse.json(
-            { error: "Failed to fetch stories" },
-            { status: 500 },
-        );
-    }
+    return NextResponse.json({ feed: rows, nextCursor });
+  } catch (err) {
+    console.error("Failed to fetch stories:", err);
+    return NextResponse.json(
+      { error: "Failed to fetch stories" },
+      { status: 500 },
+    );
+  }
 }
