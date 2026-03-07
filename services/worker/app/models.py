@@ -260,3 +260,44 @@ class Topic(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# senders
+# ---------------------------------------------------------------------------
+
+
+class Sender(Base):
+    """Aggregated stats per unique sender/publisher email address."""
+
+    __tablename__ = "senders"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(Text, nullable=False)  # raw from_addr value
+    total_emails: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    skipped_emails: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    tag_counts: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True
+    )  # {tag: count} accumulated across all emails
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    __table_args__ = (
+        Index("uq_senders_email", "email", unique=True),
+        Index("ix_senders_last_seen_at", "last_seen_at"),
+    )
+

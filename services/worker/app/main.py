@@ -52,6 +52,10 @@ STAGES = [
         "name": "Topic Assignment",
         "description": "Assign stories to topics via centroid matching",
     },
+    {
+        "name": "Sender Upsert",
+        "description": "Aggregate sender/publisher stats → senders",
+    },
 ]
 
 BANNER_WIDTH = 60
@@ -137,6 +141,13 @@ def _run_assign_topics(argv: list[str]) -> None:
     topics_main(argv)
 
 
+def _run_upsert_senders() -> None:
+    """Run sender upsert stage."""
+    from app.llm.upsert_senders import main as senders_main
+
+    senders_main()
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -174,6 +185,7 @@ def run_pipeline(argv: list[str] | None = None) -> None:
         lambda: _run_extract_stories(stories_argv),
         lambda: _run_compute_embeddings(embed_argv),
         lambda: _run_assign_topics(topics_argv),
+        lambda: _run_upsert_senders(),
     ]
 
     pipeline_t0 = time.time()

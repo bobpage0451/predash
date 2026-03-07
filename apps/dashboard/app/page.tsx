@@ -52,9 +52,12 @@ export default function FeedPage() {
       {/* Header */}
       <header className="feed-header">
         <div className="header-inner">
-          <h1 className="logo">
-            <span className="logo-icon">◆</span> Presence
-          </h1>
+          <div className="header-top-row">
+            <a href="/" className="logo">
+              <span className="logo-icon">◆</span> Presence
+            </a>
+            <a href="/publishers" className="nav-secondary-link">Publishers</a>
+          </div>
           <p className="tagline">Your processed email intelligence feed</p>
         </div>
       </header>
