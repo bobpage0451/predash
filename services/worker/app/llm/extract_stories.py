@@ -89,9 +89,13 @@ Given an email (often a newsletter), identify each distinct story, topic,
 or piece of news discussed. For each one, produce:
 - headline: a short one-line title (max ~10 words)
 - summary: 1–2 sentences describing this specific story
-- tags: a flat list of broad categorical tags for THIS story only
-  (e.g. "fintech", "regulation", "AI", "gold", "Europe").
-  Prefer general/reusable labels over email-specific actions.
+- tags: a flat list of 2–5 tags for THIS story only, chosen from the
+  taxonomy below. If no category fits well, you may use a concise label,
+  but strongly prefer the provided ones.
+  Taxonomy: AI, crypto, gold, commodities, oil, energy, equities,
+  fixed-income, macro, monetary-policy, geopolitics, regulation,
+  fintech, real-estate, earnings, M&A, IPO, ESG, labour, technology
+  Never return more than 5 tags per story.
 - sentiment: one of "bullish", "bearish", or "neutral".
   Use "bullish" for positive/optimistic outlooks, "bearish" for negative/pessimistic,
   and "neutral" for informational or mixed news.
