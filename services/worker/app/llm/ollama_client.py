@@ -37,6 +37,7 @@ def chat(
         "stream": False,
         "options": {
             "temperature": temperature,
+            "num_ctx": 8192,
         },
     }
 
